@@ -1,0 +1,146 @@
+import { useEffect, useMemo, useState } from 'react';
+import { Loader2, Plus } from 'lucide-react';
+import { base44 } from '@/api/base44Client';
+import { Button } from '@/components/ui/button';
+import AssignmentForm from '@/components/AssignmentForm';
+import AssignmentItem from '@/components/AssignmentItem';
+
+const FILTERS = [
+  { key: 'todo', label: 'To do' },
+  { key: 'done', label: 'Done' },
+  { key: 'all', label: 'All' },
+];
+
+export default function Assignments() {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('todo');
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    base44.entities.Assignment.list({ sort: 'due_date', limit: 200 })
+      .then((page) => setItems(page?.items ?? []))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const visible = useMemo(() => {
+    const list = filter === 'all' ? items : items.filter((i) => (i.status || 'todo') === filter);
+    return [...list].sort((a, b) =>
+      (a.due_date || '9999-12-31').localeCompare(b.due_date || '9999-12-31')
+    );
+  }, [items, filter]);
+
+  const openForm = (item = null) => {
+    setEditing(item);
+    setFormOpen(true);
+  };
+
+  const save = async (data) => {
+    setSaving(true);
+    try {
+      if (editing?.id) {
+        await base44.entities.Assignment.update(editing.id, data);
+        setItems((list) => list.map((i) => (i.id === editing.id ? { ...i, ...data } : i)));
+      } else {
+        const created = await base44.entities.Assignment.create({ ...data, status: 'todo' });
+        setItems((list) => [created, ...list]);
+        setFilter('todo');
+      }
+      setFormOpen(false);
+      setEditing(null);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggle = async (item) => {
+    const status = item.status === 'done' ? 'todo' : 'done';
+    setItems((list) => list.map((i) => (i.id === item.id ? { ...i, status } : i)));
+    await base44.entities.Assignment.update(item.id, { status });
+  };
+
+  const remove = async (item) => {
+    if (!window.confirm(`Delete “${item.title}”?`)) return;
+    setItems((list) => list.filter((i) => i.id !== item.id));
+    await base44.entities.Assignment.delete(item.id);
+  };
+
+  const openCount = items.filter((i) => (i.status || 'todo') !== 'done').length;
+
+  return (
+    <div className="mx-auto w-full max-w-3xl">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="font-heading text-2xl font-bold tracking-tight">Homework</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {openCount === 0 ? 'Nothing open right now.' : `${openCount} ${openCount === 1 ? 'task' : 'tasks'} still open.`}
+          </p>
+        </div>
+        <Button className="rounded-full" onClick={() => openForm()}>
+          <Plus className="mr-1.5 h-4 w-4" /> Add homework
+        </Button>
+      </div>
+
+      <div className="mt-5 inline-flex rounded-full bg-secondary p-1">
+        {FILTERS.map((f) => (
+          <button
+            key={f.key}
+            type="button"
+            onClick={() => setFilter(f.key)}
+            className={`rounded-full px-4 py-1.5 text-xs font-semibold transition-colors ${
+              filter === f.key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      <section className="soft-card mt-4 p-5">
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading your list…
+          </div>
+        ) : visible.length === 0 ? (
+          <div className="py-10 text-center">
+            <p className="text-sm font-medium">
+              {filter === 'done' ? 'Nothing finished yet.' : 'Nothing here yet.'}
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {filter === 'done'
+                ? 'Check something off and it will show up here.'
+                : 'Add your first assignment and we will take it one step at a time.'}
+            </p>
+            {filter !== 'done' && (
+              <Button variant="outline" className="mt-4 rounded-full" onClick={() => openForm()}>
+                <Plus className="mr-1.5 h-4 w-4" /> Add homework
+              </Button>
+            )}
+          </div>
+        ) : (
+          <div className="divide-y divide-border">
+            {visible.map((item) => (
+              <AssignmentItem
+                key={item.id}
+                item={item}
+                onToggle={toggle}
+                onEdit={openForm}
+                onDelete={remove}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <AssignmentForm
+        open={formOpen}
+        onOpenChange={setFormOpen}
+        initial={editing}
+        onSubmit={save}
+        saving={saving}
+      />
+    </div>
+  );
+}
